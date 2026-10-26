@@ -325,7 +325,9 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       expect(host.getStatus()).toBe('ready');
     } finally { await host.disconnect(); vi.useRealTimers(); }
   });
-  it('waits beyond the transport deadline, delivers an answer, clears it, and reaches ready', async () => {
+  // Multi-round input resets the per-round deadline; consumers must budget for
+  // all six rounds, including server response gaps (PR #7184, unit/fake time).
+  it('allows six slow authentication rounds, clears answers, and reaches ready', async () => {
     vi.useFakeTimers();
     let respond!: (answers: string[]) => void;
     let signal!: AbortSignal;
@@ -335,14 +337,20 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       expect(await verify()).toBe(true);
       expect(client.connectConfig).toMatchObject({ tryKeyboard: true, readyTimeout: 0 });
       const received: string[][] = [];
-      prompt(answers => { received.push([...answers]); client.emit('ready'); });
-      await vi.advanceTimersByTimeAsync(30_000);
-      expect(host.getStatus()).not.toBe('failed');
-      const answers = ['FAKE-OTP']; respond(answers);
+      const settled = vi.fn();
+      void connecting.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(19_000);
+      for (let round = 0; round < 6; round++) {
+        prompt(answers => { received.push([...answers]); });
+        await vi.advanceTimersByTimeAsync(119_000);
+        const answers = ['FAKE-OTP']; respond(answers);
+        await vi.advanceTimersByTimeAsync(19_000);
+        expect(answers).toEqual(['']);
+        expect(settled).not.toHaveBeenCalled();
+      }
+      client.emit('ready');
       await connecting;
-      await Promise.resolve();
-      expect(received).toEqual([['FAKE-OTP']]);
-      expect(answers).toEqual(['']);
+      expect(received).toEqual(Array.from({ length: 6 }, () => ['FAKE-OTP']));
       expect(signal.aborted).toBe(true);
       expect(host.getStatus()).toBe('ready');
     } finally { await host.disconnect(); vi.useRealTimers(); }

@@ -27,6 +27,7 @@ import { type HostKeyStore, hostKeyFingerprint, hostKeyId, decideHostKey } from 
 import {
   InteractiveAuthenticationError, isInteractiveAuthenticationMessage,
   INTERACTIVE_AUTH_TIMEOUT_MS, INTERACTIVE_AUTH_MAX_ROUNDS,
+  SSH_READY_TIMEOUT_MS,
   INTERACTIVE_AUTH_MAX_ANSWER_LENGTH, validInteractiveChallenge,
   SSH_INTERACTIVE_CONNECTION_INTERRUPTED_MESSAGE,
   type KeyboardInteractiveHandler,
@@ -49,7 +50,6 @@ export interface RemoteHostDeps {
   keyboardInteractive?: KeyboardInteractiveHandler;
 }
 
-const READY_TIMEOUT_MS = 20_000;
 const KEEPALIVE_INTERVAL_MS = 30_000;
 const KEEPALIVE_COUNT_MAX = 3;
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -1265,7 +1265,7 @@ export class RemoteHost {
       username: attemptConfig.user,
       // Own the deadline only when a human-input handler is available. Handshake
       // still gets 20s; a verified challenge temporarily gets two minutes.
-      readyTimeout: this.keyboardInteractive ? 0 : READY_TIMEOUT_MS,
+      readyTimeout: this.keyboardInteractive ? 0 : SSH_READY_TIMEOUT_MS,
       tryKeyboard: true,
       keepaliveInterval: KEEPALIVE_INTERVAL_MS,
       keepaliveCountMax: KEEPALIVE_COUNT_MAX,
@@ -1458,7 +1458,7 @@ export class RemoteHost {
               fail('failed'); return;
             }
             inputPending = false;
-            deadline(READY_TIMEOUT_MS);
+            deadline(SSH_READY_TIMEOUT_MS);
             finish(answers);
           } catch (error) {
             // Dependency errors may contain an answer. Only local fixed copy escapes.
@@ -1471,7 +1471,7 @@ export class RemoteHost {
       });
 
       try {
-        if (this.keyboardInteractive) deadline(READY_TIMEOUT_MS);
+        if (this.keyboardInteractive) deadline(SSH_READY_TIMEOUT_MS);
         client.connect(connectConfig);
       } catch (err) {
         onError(err as Error);

@@ -35,7 +35,7 @@
 import {
   effectiveAuthenticationFingerprint,
   isInteractiveAuthenticationMessage,
-  INTERACTIVE_AUTH_TIMEOUT_MS,
+  INTERACTIVE_AUTH_TOTAL_TIMEOUT_MS,
   type HostConfig,
   type RemoteHost,
 } from '@cindy/maker-remote-ssh';
@@ -68,8 +68,8 @@ export interface TunnelKeeperDeps {
 const RETRY_BACKOFF_MS = [3_000, 5_000, 10_000, 20_000, 30_000, 60_000];
 /** 连续 arm 失败达到该次数后尝试一次残留监听清理。 */
 const STALE_CLEANUP_AFTER_FAILURES = 2;
-/** ensureTunnelUp 缺省等待上限。 */
-const DEFAULT_ENSURE_UP_TIMEOUT_MS = INTERACTIVE_AUTH_TIMEOUT_MS + 40_000;
+/** Cover all authentication rounds and network windows, plus time to arm forwarding. */
+const DEFAULT_ENSURE_UP_TIMEOUT_MS = INTERACTIVE_AUTH_TOTAL_TIMEOUT_MS + 40_000;
 
 interface Waiter {
   resolve: (v: { remotePort: number }) => void;
