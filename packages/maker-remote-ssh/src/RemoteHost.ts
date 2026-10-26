@@ -378,6 +378,7 @@ export class RemoteHost {
   private readonly hostKeys?: HostKeyStore;
   private readonly keyboardInteractive?: KeyboardInteractiveHandler;
   private cancelInteractiveAttempt: (() => void) | null = null;
+  private interactiveAuthenticationExpiresAt: number | null = null;
   /**
    * Set by the host-key verifier when it rejects a connect, so onError can
    * surface an actionable message instead of ssh2's opaque handshake error.
@@ -440,6 +441,19 @@ export class RemoteHost {
   onStatus(listener: StatusListener): () => void {
     this.events.on('status', listener);
     return () => this.events.off('status', listener);
+  }
+
+  /** Process-local input deadline only; never exposes prompts or answers in snapshots. */
+  onInteractiveAuthentication(listener: (expiresAt: number | null) => void): () => void {
+    this.events.on('authentication-input', listener);
+    listener(this.interactiveAuthenticationExpiresAt);
+    return () => { this.events.off('authentication-input', listener); };
+  }
+
+  private setInteractiveAuthenticationDeadline(expiresAt: number | null): void {
+    if (this.interactiveAuthenticationExpiresAt === expiresAt) return;
+    this.interactiveAuthenticationExpiresAt = expiresAt;
+    this.events.emit('authentication-input', expiresAt);
   }
 
   /**
@@ -1305,7 +1319,11 @@ export class RemoteHost {
       const cancelInput = () => {
         if (readyTimer) clearTimeout(readyTimer);
         inputController.abort();
-        if (this.cancelInteractiveAttempt === cancelAttempt) this.cancelInteractiveAttempt = null;
+        // An old client's late close/error must not clear a newer attempt's input.
+        if (this.cancelInteractiveAttempt === cancelAttempt) {
+          this.cancelInteractiveAttempt = null;
+          this.setInteractiveAuthenticationDeadline(null);
+        }
       };
       const cancelAttempt = () => {
         cancelInput();
@@ -1443,6 +1461,7 @@ export class RemoteHost {
         if (!this.keyboardInteractive) { fail('required'); return; }
         inputPending = true;
         deadline(INTERACTIVE_AUTH_TIMEOUT_MS, true);
+        this.setInteractiveAuthenticationDeadline(Date.now() + INTERACTIVE_AUTH_TIMEOUT_MS);
         void (async () => {
           let answers: string[] | null = null;
           try {
@@ -1459,6 +1478,7 @@ export class RemoteHost {
             }
             inputPending = false;
             deadline(SSH_READY_TIMEOUT_MS);
+            this.setInteractiveAuthenticationDeadline(null);
             finish(answers);
           } catch (error) {
             // Dependency errors may contain an answer. Only local fixed copy escapes.

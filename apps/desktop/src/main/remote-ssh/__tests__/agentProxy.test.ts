@@ -599,6 +599,10 @@ describe('reconcile × tunnel keeper 集成 (事务边界, R2 review P1/P3)', ()
     onStatus() {
       return () => {};
     }
+    onInteractiveAuthentication(listener: (expiresAt: number | null) => void) {
+      listener(null);
+      return () => {};
+    }
     async connect() {
       this.status = 'ready';
     }

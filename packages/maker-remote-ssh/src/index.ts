@@ -93,7 +93,6 @@ export { ConnectionPool } from './ConnectionPool.js';
 export {
   InteractiveAuthenticationError, SSH_INTERACTIVE_AUTH_FAILED_CODE,
   INTERACTIVE_AUTH_TIMEOUT_MS, INTERACTIVE_AUTH_MAX_ANSWER_LENGTH,
-  INTERACTIVE_AUTH_TOTAL_TIMEOUT_MS,
   INTERACTIVE_AUTH_MAX_PROMPTS,
 } from './keyboardInteractive.js';
 export type { KeyboardInteractiveChallenge, KeyboardInteractiveHandler } from './keyboardInteractive.js';

@@ -325,14 +325,16 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       expect(host.getStatus()).toBe('ready');
     } finally { await host.disconnect(); vi.useRealTimers(); }
   });
-  // Multi-round input resets the per-round deadline; consumers must budget for
-  // all six rounds, including server response gaps (PR #7184, unit/fake time).
+  // PR #7184: only real local input extends dependent waiters. Observe the real
+  // entry's input deadlines across six rounds and server gaps (unit/fake time).
   it('allows six slow authentication rounds, clears answers, and reaches ready', async () => {
     vi.useFakeTimers();
     let respond!: (answers: string[]) => void;
     let signal!: AbortSignal;
     const handler = vi.fn((_challenge, abort: AbortSignal) => { signal = abort; return new Promise<string[]>(resolve => { respond = resolve; }); });
     const { host, connecting, client, verify, prompt } = await interactiveHost(handler);
+    const input = vi.fn();
+    const offInput = host.onInteractiveAuthentication(input);
     try {
       expect(await verify()).toBe(true);
       expect(client.connectConfig).toMatchObject({ tryKeyboard: true, readyTimeout: 0 });
@@ -341,7 +343,11 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       void connecting.then(settled, settled);
       await vi.advanceTimersByTimeAsync(19_000);
       for (let round = 0; round < 6; round++) {
-        prompt(answers => { received.push([...answers]); });
+        prompt(answers => {
+          expect(input).toHaveBeenLastCalledWith(null);
+          received.push([...answers]);
+        });
+        expect(input).toHaveBeenLastCalledWith(Date.now() + 120_000);
         await vi.advanceTimersByTimeAsync(119_000);
         const answers = ['FAKE-OTP']; respond(answers);
         await vi.advanceTimersByTimeAsync(19_000);
@@ -353,7 +359,8 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       expect(received).toEqual(Array.from({ length: 6 }, () => ['FAKE-OTP']));
       expect(signal.aborted).toBe(true);
       expect(host.getStatus()).toBe('ready');
-    } finally { await host.disconnect(); vi.useRealTimers(); }
+      expect(input).toHaveBeenLastCalledWith(null);
+    } finally { offInput(); await host.disconnect(); vi.useRealTimers(); }
   });
 
   it.each(['cancelled', 'timeout', 'exception', 'invalid', 'server-error'] as const)('fails closed for %s without leaking input or reopening prompts', async reason => {
@@ -362,6 +369,8 @@ describe('RemoteHost keyboard-interactive authentication', () => {
     let rejectInput!: (err: Error) => void;
     const handler = vi.fn(() => new Promise<string[] | null>((resolve, reject) => { respond = resolve; rejectInput = reject; }));
     const { host, connecting, client, logger, verify, prompt } = await interactiveHost(handler);
+    const input = vi.fn();
+    const offInput = host.onInteractiveAuthentication(input);
     const rejected = expect(connecting).rejects.toMatchObject({ code: 'SSH_INTERACTIVE_AUTH_FAILED' });
     try {
       await verify();
@@ -372,6 +381,7 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       if (reason === 'invalid') respond(['FAKE-OTP', 'extra']);
       if (reason === 'server-error') client.emit('error', new Error('FAKE-OTP was rejected'));
       await rejected;
+      expect(input).toHaveBeenLastCalledWith(null);
       client.emit('error', new Error('FAKE-OTP echoed by a closing transport'));
       if (reason === 'server-error') client.emit('close');
       await vi.advanceTimersByTimeAsync(60_000);
@@ -380,7 +390,7 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       expect(finish).not.toHaveBeenCalled();
       expect(JSON.stringify(host.snapshot())).not.toContain('FAKE-OTP');
       expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('FAKE-OTP');
-    } finally { await host.disconnect(); vi.useRealTimers(); }
+    } finally { offInput(); await host.disconnect(); vi.useRealTimers(); }
   });
 
   it('aborts on disconnect and ignores and clears a late answer', async () => {
@@ -390,14 +400,18 @@ describe('RemoteHost keyboard-interactive authentication', () => {
       signal = abort; return new Promise(resolve => { respond = resolve; });
     });
     const rejected = expect(connecting).rejects.toThrow('SSH connection attempt cancelled');
+    const input = vi.fn();
+    const offInput = host.onInteractiveAuthentication(input);
     await verify();
     const finish = vi.fn(); prompt(finish);
     await host.disconnect(); await rejected;
+    expect(input).toHaveBeenLastCalledWith(null);
     expect(signal.aborted).toBe(true);
     const late = ['FAKE-LATE']; respond(late);
     await Promise.resolve(); await Promise.resolve();
     expect(finish).not.toHaveBeenCalled();
     expect(late).toEqual(['']);
+    offInput();
   });
 
   it('never requests input from an unverified host', async () => {
@@ -407,6 +421,43 @@ describe('RemoteHost keyboard-interactive authentication', () => {
     prompt(vi.fn()); await rejected;
     expect(handler).not.toHaveBeenCalled();
     await host.disconnect();
+  });
+
+  it('keeps a new input deadline when an old connection closes or answers late', async () => {
+    vi.useFakeTimers();
+    const responders: Array<(answers: string[]) => void> = [];
+    const { host, connecting, client, verify, prompt } = await interactiveHost(
+      () => new Promise(resolve => { responders.push(resolve); }),
+    );
+    const input = vi.fn();
+    const offInput = host.onInteractiveAuthentication(input);
+    const rejected = expect(connecting).rejects.toThrow('SSH connection attempt cancelled');
+    try {
+      await verify();
+      prompt(vi.fn());
+      await host.disconnect();
+      await rejected;
+      const reconnecting = host.connect();
+      await vi.advanceTimersByTimeAsync(1);
+      const next = h.client!;
+      await new Promise<boolean>(resolve => next.connectConfig!.hostVerifier!(Buffer.from('test-key'), resolve));
+      next.emit('keyboard-interactive', 'MFA', 'Enter code', '', [{ prompt: 'Code', echo: false }], () => next.emit('ready'));
+      const currentDeadline = Date.now() + 120_000;
+      const lateObserver = vi.fn();
+      const offLate = host.onInteractiveAuthentication(lateObserver);
+      expect(lateObserver).toHaveBeenLastCalledWith(currentDeadline);
+      offLate();
+      const late = ['FAKE-LATE'];
+      responders[0]!(late);
+      client.emit('close');
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(input).toHaveBeenLastCalledWith(currentDeadline);
+      expect(late).toEqual(['']);
+      responders[1]!(['FAKE-OTP']);
+      await reconnecting;
+      expect(host.getStatus()).toBe('ready');
+      expect(input).toHaveBeenLastCalledWith(null);
+    } finally { offInput(); await host.disconnect(); vi.useRealTimers(); }
   });
 
   it('reports a missing local input handler and handles empty informational rounds without UI', async () => {

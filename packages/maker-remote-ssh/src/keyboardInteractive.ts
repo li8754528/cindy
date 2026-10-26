@@ -15,10 +15,6 @@ export const INTERACTIVE_AUTH_TIMEOUT_MS = 120_000;
 export const INTERACTIVE_AUTH_MAX_ROUNDS = 6;
 /** Network progress deadline before the first challenge and after each answer. */
 export const SSH_READY_TIMEOUT_MS = 20_000;
-/** Maximum single-attempt budget, including every input and network window. */
-export const INTERACTIVE_AUTH_TOTAL_TIMEOUT_MS =
-  INTERACTIVE_AUTH_MAX_ROUNDS * INTERACTIVE_AUTH_TIMEOUT_MS
-  + (INTERACTIVE_AUTH_MAX_ROUNDS + 1) * SSH_READY_TIMEOUT_MS;
 export const INTERACTIVE_AUTH_MAX_PROMPTS = 16;
 export const INTERACTIVE_AUTH_MAX_ANSWER_LENGTH = 4096;
 export const SSH_INTERACTIVE_AUTH_FAILED_CODE = 'SSH_INTERACTIVE_AUTH_FAILED';
