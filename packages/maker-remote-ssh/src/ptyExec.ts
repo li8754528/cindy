@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Client } from 'ssh2';
 import type { ExecOpts, ExecResult } from './RemoteHost.js';
-import { openPtyShell, type PtyShell } from './ptyShell.js';
+import { MAX_PTY_INPUT_BUFFER_BYTES, openPtyShell, type PtyShell } from './ptyShell.js';
 
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 const MAX_PREAMBLE_CHARS = 64 * 1024;
@@ -23,12 +23,16 @@ const bashQuote = (value: string) => "$'" + value
 export function execPtyShell(
   client: Client, command: string, options: ExecOpts | undefined, isCurrent: () => boolean,
 ): Promise<ExecResult> {
-  const input = options?.input ?? '';
+  // An echoed PTY command and its argv are audited. Never embed reversible
+  // stdin there; reject it before opening a shell rather than disclose input.
+  if (options?.input) {
+    return Promise.reject(new Error('PTY command transport does not support stdin input.'));
+  }
   if (/[\u0000-\u0008\u000b-\u001f\u007f]/.test(command)) {
     return Promise.reject(new Error('PTY command contains unsupported control characters.'));
   }
-  if (Buffer.byteLength(command) > MAX_PAYLOAD_BYTES || Buffer.byteLength(input) > MAX_PAYLOAD_BYTES) {
-    return Promise.reject(new Error('PTY command and input must each be at most 64 KiB.'));
+  if (Buffer.byteLength(command) > MAX_PAYLOAD_BYTES) {
+    return Promise.reject(new Error('PTY command must be at most 64 KiB.'));
   }
   const env = options?.env ?? {};
   if (Object.keys(env).some(key => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) {
@@ -44,19 +48,23 @@ export function execPtyShell(
   const commandEcho = nonce + '_COMMAND_INPUT';
   const handshake = 'printf ' + quote(slash + '036' + nonce + '_READY' + slash + '037') +
     ' # ' + handshakeEcho;
-  const encodedInput = Buffer.from(input).toString('base64');
-  const envArgs = Object.entries(env).map(([key, value]) => quote(key + '=' + value)).join(' ');
+  const envArgs = Object.entries(env).map(([key, value]) => bashQuote(key + '=' + value)).join(' ');
   const script = [
-    // Put the actual command first, before any potentially long stdin payload.
-    'cindy_run() { env ' + envArgs + ' /bin/sh -c ' + quote(command) + '; }',
     'printf ' + quote(slash + '036' + nonce + '_START' + slash + '037'),
-    'printf %s ' + quote(encodedInput) + ' | base64 -d | cindy_run',
+    'c=$1; shift',
+    'env "$@" bash -c "$c" </dev/null',
     's=$?',
     'printf ' + quote(slash + '036' + nonce + '_EXIT:%d' + slash + '037') + ' "$s"',
   ].join('; ');
   // Let finish close the shell after the verified footer is received. An outer
   // exit can make the bastion close the channel before buffered output arrives.
-  const run = 'bash -c ' + bashQuote(script) + ' # ' + commandEcho;
+  // Quote the user command once as a positional argument, not inside another
+  // quoted script. Even 64KiB of quotes fits the bounded PTY write queue.
+  const run = 'bash -c ' + quote(script) + ' cindy-pty ' + bashQuote(command) +
+    (envArgs ? ' ' + envArgs : '') + ' # ' + commandEcho;
+  if (Buffer.byteLength(run) > MAX_PTY_INPUT_BUFFER_BYTES) {
+    return Promise.reject(new Error('PTY encoded command and environment exceed the terminal input limit.'));
+  }
 
   return new Promise((resolve, reject) => {
     const abort = new AbortController();

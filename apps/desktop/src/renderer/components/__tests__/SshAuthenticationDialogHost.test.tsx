@@ -1,13 +1,15 @@
-// @vitest-environment jsdom
+// @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SshAuthenticationRequest } from '../../../shared/sshAuthentication';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 import { SshAuthenticationDialogHost, SshAuthenticationForm } from '../SshAuthenticationDialogHost';
-// Test value (unit, jsdom): the real host/form must mask and discard fake input,
+// Test value (unit, DOM): the real host/form must mask and discard fake input,
 // submit once, and keep a dismissed challenge out of a delayed initial snapshot.
 // OTP UI is new; broker tests cannot observe DOM input or IME behavior. Minimal
 // failures are an echo=true prompt, a dismiss-before-list race, and composing Enter.
+// Use a lightweight DOM environment to keep the new file within the 5s budget;
+// render the actual Radix dialog, Input, FormField and Button without replacements.
 const request: SshAuthenticationRequest = {
   requestId: 'request-1', expiresAt: Date.now() + 120_000,
   host: { id: 'test', user: 'test', hostname: 'example.test', port: 22 },

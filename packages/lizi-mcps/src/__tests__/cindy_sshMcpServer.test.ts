@@ -277,14 +277,31 @@ describe('ssh_exec', () => {
     const pool: SshPoolLike = { list: () => [snapshot({ id: 'bastion' })], get: () => ({ exec, execPty }) };
     const { deps, ensureReadyCalls } = makeDeps(pool);
     const { payload, isError } = await callParsed(makeRegistry(deps), 'ssh_exec', {
-      host: 'bastion', command: 'test-command', input: 'test-input', transport: 'pty',
+      host: 'bastion', command: 'test-command', transport: 'pty',
     });
     expect(isError).toBeFalsy();
     expect(ensureReadyCalls).toEqual(['bastion']);
     expect(exec).not.toHaveBeenCalled();
     expect(execPty).toHaveBeenCalledOnce();
-    expect(execPty).toHaveBeenCalledWith('test-command', expect.objectContaining({ input: 'test-input', maxOutputBytes: 512 * 1024 }));
+    expect(execPty).toHaveBeenCalledWith('test-command', expect.objectContaining({ maxOutputBytes: 512 * 1024 }));
     expect(payload).toMatchObject({ stdout: 'out\nerr\n', stderr: '', exitCode: 3, stderrMerged: true, transport: 'pty' });
+  });
+  // PR #7184 review: reject private PTY stdin before authentication and either
+  // transport, including hosts supplied by older injected implementations.
+  it('rejects PTY stdin without connecting or exposing it in the tool response', async () => {
+    const exec = vi.fn();
+    const execPty = vi.fn();
+    const pool: SshPoolLike = { list: () => [snapshot({ id: 'bastion' })], get: () => ({ exec, execPty }) };
+    const { deps, ensureReadyCalls } = makeDeps(pool);
+    const { payload, isError } = await callParsed(makeRegistry(deps), 'ssh_exec', {
+      host: 'bastion', command: 'never-execute', input: 'FAKE-PRIVATE-INPUT', transport: 'pty',
+    });
+    expect(isError).toBe(true);
+    expect(payload.errorCode).toBe('INVALID_ARGS');
+    expect(JSON.stringify(payload)).not.toContain('FAKE-PRIVATE-INPUT');
+    expect(ensureReadyCalls).toEqual([]);
+    expect(exec).not.toHaveBeenCalled();
+    expect(execPty).not.toHaveBeenCalled();
   });
   it('fails without fallback when a host lacks PTY support', async () => {
     const { pool, execCalls } = makeFakePool([snapshot({ id: 'bastion' })]);

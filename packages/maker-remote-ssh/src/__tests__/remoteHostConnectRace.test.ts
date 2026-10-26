@@ -140,12 +140,46 @@ describe('RemoteHost PTY command transport', () => {
   function proveShell(channel: FakeShellChannel, nonce: string) {
     channel.emit('data', Buffer.from(String(channel.write.mock.calls[0][0])));
     channel.emit('data', Buffer.from('\x1e' + nonce + '_READY\x1f'));
-    channel.emit('data', Buffer.from(String(channel.write.mock.calls[2][0])));
+    const commandLine = channel.write.mock.calls[2]?.[0];
+    if (commandLine !== undefined) channel.emit('data', Buffer.from(String(commandLine)));
   }
-  it('sends user input only after shell proof and returns framed Unicode output and nonzero exit', async () => {
+  // PR #7184: stdin was reversibly embedded in the audited command and a failed
+  // decoder still ran it. Nonempty input must fail before opening any PTY.
+  it('rejects private stdin before opening a shell or executing a command', async () => {
     const { host, client } = await readyHost();
     try {
-      const result = host.execPty('printf visible-command', { input: 'FAKE-SECRET-INPUT' });
+      const result = host.execPty('never-execute', { input: 'FAKE-PRIVATE-INPUT' });
+      const rejected = expect(result).rejects.toThrow('PTY command transport does not support stdin input.');
+      if (client.shellPending.length) { const { channel } = await attach(client); channel.emit('close'); }
+      await rejected;
+      expect(client.shellPending).toHaveLength(0);
+    } finally { await host.disconnect(); }
+  });
+  // PR #7184: repeated quoting expanded a valid <64KiB command beyond the real
+  // openPtyShell queue cap. This uses that production writer, not a copied limit.
+  it('executes a quote-heavy command within the advertised raw size limit', async () => {
+    const { host, client } = await readyHost();
+    try {
+      const result = host.execPty('printf x ' + "''".repeat(20 * 1024));
+      const outcome = result.then(value => ({ value }), error => ({ error: error.message }));
+      const { channel, nonce } = await attach(client);
+      proveShell(channel, nonce);
+      channel.emit('data', Buffer.from('\x1e' + nonce + '_START\x1fx\x1e' + nonce + '_EXIT:0\x1f'));
+      await expect(outcome).resolves.toMatchObject({ value: { stdout: 'x', exitCode: 0 } });
+    } finally { await host.disconnect(); }
+  });
+  it('rejects an oversized encoded command and environment before opening a shell', async () => {
+    const { host, client } = await readyHost();
+    try {
+      await expect(host.execPty('never-execute', { env: { CINDY_FAKE_VALUE: 'x'.repeat(300_000) } }))
+        .rejects.toThrow('PTY encoded command and environment exceed the terminal input limit.');
+      expect(client.shellPending).toHaveLength(0);
+    } finally { await host.disconnect(); }
+  });
+  it('sends the command only after shell proof and returns framed Unicode output and nonzero exit', async () => {
+    const { host, client } = await readyHost();
+    try {
+      const result = host.execPty('printf visible-command');
       const { channel, wire, nonce } = await attach(client);
       expect(client.shellOptions).toMatchObject({ term: 'xterm-256color', cols: 80, rows: 24 });
       channel.emit('data', Buffer.from('FAKE-LOGIN-BANNER\r\n' + wire));

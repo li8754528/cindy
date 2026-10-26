@@ -1,6 +1,8 @@
 import { StringDecoder } from 'node:string_decoder';
 import type { Client, ClientChannel } from 'ssh2';
 
+export const MAX_PTY_INPUT_BUFFER_BYTES = 256 * 1024;
+
 export interface PtyShellOptions {
   cols: number;
   rows: number;
@@ -84,7 +86,7 @@ export function openPtyShell(
             if (!isCurrent()) { cancel(); return; }
             if (ended) return;
             // Bound the ssh2 writable queue when a server stops consuming input.
-            if (stream.writableLength + Buffer.byteLength(data) > 256 * 1024) {
+            if (stream.writableLength + Buffer.byteLength(data) > MAX_PTY_INPUT_BUFFER_BYTES) {
               cancel();
               throw new Error('SSH terminal input buffer full.');
             }

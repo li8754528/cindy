@@ -4,10 +4,15 @@
 
 cindy_ssh 的 ssh_exec 增加可选 transport: exec / pty, 省略仍走既有 exec。
 pty 使用已认证连接的交互 Shell, 先验证随机握手与结果边界再返回一次性命令结果。
-命令以可读的 Bash 参数发送, 远端需已有 Bash 和 base64。保留终端回显, 等待输入回显后
+命令以可读的 Bash 参数发送, PTY 用户命令明确使用 Bash, 远端需已有 Bash。保留终端回显, 等待输入回显后
 单独发送回车, 让堡垒机照常解析输入并检查策略; 不自动重放命令、不安装远端组件。
 PTY 的 stderr 合并到 stdout, 结果追加可选 stderrMerged: true 和 transport: pty;
-命令与 stdin 分别上限 64 KiB, 既有输出上限仍生效。此能力不承诺远程 AI 项目或二进制流。
+命令上限 64 KiB, 单次转义后的命令与环境总长度不得超过终端 256 KiB 输入队列。
+这些是客户端限额, 不保证每个服务器终端都能及时回显该长度。未收到尾部回显时
+不发送回车; 超时关闭 Shell, 不自动拆解或重放命令。
+PTY 在建立 Shell 前拒绝非空 stdin, 不将输入或其可逆编码放入回显命令与进程参数;
+命令 stdin 从 /dev/null 读取 EOF。普通 exec 的 stdin 不变, 既有输出上限仍生效。
+此能力不承诺远程 AI 项目或二进制流。
 
 注入的主机接口可选提供 execPty; 旧宿主未提供时明确失败, 不回落 exec。
 既有 stat-remote-path / list-remote-dir 请求同样支持可选 transport, 用于只读路径访问;
