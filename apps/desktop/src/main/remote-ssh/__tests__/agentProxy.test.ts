@@ -97,7 +97,7 @@ function makeFakeHost(opts: { marker?: string | null } = {}) {
     async exec(cmd: string, execOpts?: { input?: string }) {
       state.execCalls.push({ cmd, input: execOpts?.input });
       if (cmd.includes('cat "') && cmd.includes('agent-proxy.env')) {
-        return { stdout: state.marker ?? '', stderr: '', exitCode: 0, signal: null };
+        return { stdout: '__CINDY_AGENT_PROXY_MARKER_V1__\n' + (state.marker ?? ''), stderr: '', exitCode: 0, signal: null };
       }
       if (cmd.includes('cat > "') && cmd.includes('agent-proxy.env')) {
         state.marker = (execOpts?.input ?? '').trim();
@@ -212,6 +212,21 @@ describe('getRemoteAgentProxyEnv', () => {
 });
 
 describe('reconcileCodexAgentProxyEnv', () => {
+  // Real ready-path regression: a bastion diagnostic must never trigger rm/pkill.
+  it.each([
+    { stdout: 'No PTY requested.\n', exitCode: 0 },
+    { stdout: '__CINDY_AGENT_PROXY_MARKER_V1__\n', exitCode: 1 },
+    { stdout: '__CINDY_AGENT_PROXY_MARKER_V1__\n', exitCode: null },
+    { stdout: '__CINDY_AGENT_PROXY_MARKER_V1__\n', exitCode: 0, truncated: true },
+  ])('rejects an unverified marker read before any remote mutation (%j)', async result => {
+    const { host, state } = makeFakeHost();
+    const exec = vi.spyOn(host, 'exec').mockResolvedValueOnce({ ...result, stderr: '', signal: null });
+    await expect(reconcileCodexAgentProxyEnv(host)).rejects.toThrow('Cannot read remote proxy configuration.');
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(state.marker).toBeNull();
+    expect(state.pkillCount).toBe(0);
+  });
+
   it('no-ops when the marker already matches the desired content (tunnel mode)', async () => {
     setSshHostAgentProxy('test-host', TUNNEL_PREF);
     const desired = buildAgentProxyMarkerContent('http://127.0.0.1:17893').trim();

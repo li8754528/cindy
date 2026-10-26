@@ -34,6 +34,8 @@
 
 import {
   effectiveAuthenticationFingerprint,
+  isInteractiveAuthenticationMessage,
+  INTERACTIVE_AUTH_TIMEOUT_MS,
   type HostConfig,
   type RemoteHost,
 } from '@cindy/maker-remote-ssh';
@@ -67,7 +69,7 @@ const RETRY_BACKOFF_MS = [3_000, 5_000, 10_000, 20_000, 30_000, 60_000];
 /** 连续 arm 失败达到该次数后尝试一次残留监听清理。 */
 const STALE_CLEANUP_AFTER_FAILURES = 2;
 /** ensureTunnelUp 缺省等待上限。 */
-const DEFAULT_ENSURE_UP_TIMEOUT_MS = 20_000;
+const DEFAULT_ENSURE_UP_TIMEOUT_MS = INTERACTIVE_AUTH_TIMEOUT_MS + 40_000;
 
 interface Waiter {
   resolve: (v: { remotePort: number }) => void;
@@ -347,6 +349,13 @@ function handleConnStatus(entry: Entry, status: string, lastError?: string): voi
   if (status === 'failed') {
     // RemoteHost 内部 5 次重连耗尽 — 本模块接管无上限退避。
     setState(entry, { phase: 'error', remotePort: entry.remotePort, lastError });
+    if (lastError && isInteractiveAuthenticationMessage(lastError)) {
+      entry.paused = true;
+      entry.kickPending = false;
+      clearRetry(entry);
+      settleWaiters(entry, new Error(lastError));
+      return;
+    }
     scheduleRetry(entry);
     return;
   }
@@ -396,6 +405,13 @@ async function runCycle(entry: Entry): Promise<void> {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setState(entry, { phase: 'error', remotePort: entry.remotePort, lastError: msg });
+      if (isInteractiveAuthenticationMessage(msg)) {
+        entry.paused = true;
+        entry.kickPending = false;
+        clearRetry(entry);
+        settleWaiters(entry, new Error(msg));
+        return;
+      }
       scheduleRetry(entry);
       return;
     }

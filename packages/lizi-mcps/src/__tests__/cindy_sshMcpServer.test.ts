@@ -269,6 +269,32 @@ describe('host resolution', () => {
 // ── ssh_exec ────────────────────────────────────────────────────────────────
 
 describe('ssh_exec', () => {
+  // Public tool boundary: explicit PTY selection must preserve auth/limits and
+  // output provenance, without silently replaying a command via normal exec.
+  it('routes explicit PTY execution once and marks the combined output', async () => {
+    const exec = vi.fn();
+    const execPty = vi.fn(async () => ({ stdout: 'out\nerr\n', stderr: '', exitCode: 3, signal: null, stderrMerged: true }));
+    const pool: SshPoolLike = { list: () => [snapshot({ id: 'bastion' })], get: () => ({ exec, execPty }) };
+    const { deps, ensureReadyCalls } = makeDeps(pool);
+    const { payload, isError } = await callParsed(makeRegistry(deps), 'ssh_exec', {
+      host: 'bastion', command: 'test-command', input: 'test-input', transport: 'pty',
+    });
+    expect(isError).toBeFalsy();
+    expect(ensureReadyCalls).toEqual(['bastion']);
+    expect(exec).not.toHaveBeenCalled();
+    expect(execPty).toHaveBeenCalledOnce();
+    expect(execPty).toHaveBeenCalledWith('test-command', expect.objectContaining({ input: 'test-input', maxOutputBytes: 512 * 1024 }));
+    expect(payload).toMatchObject({ stdout: 'out\nerr\n', stderr: '', exitCode: 3, stderrMerged: true, transport: 'pty' });
+  });
+  it('fails without fallback when a host lacks PTY support', async () => {
+    const { pool, execCalls } = makeFakePool([snapshot({ id: 'bastion' })]);
+    const { deps } = makeDeps(pool);
+    const { isError } = await callParsed(makeRegistry(deps), 'ssh_exec', {
+      host: 'bastion', command: 'never-replay', transport: 'pty',
+    });
+    expect(isError).toBe(true);
+    expect(execCalls).toHaveLength(0);
+  });
   it('runs command via ensureReady + exec, returns stdout/exitCode', async () => {
     const { pool, execCalls } = makeFakePool([snapshot({ id: 'web-1', hostname: '10.0.0.5' })]);
     const { deps, ensureReadyCalls } = makeDeps(pool);

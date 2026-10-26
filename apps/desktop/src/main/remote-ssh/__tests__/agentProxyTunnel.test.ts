@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { HostConfig } from '@cindy/maker-remote-ssh';
+import { InteractiveAuthenticationError } from '@cindy/maker-remote-ssh';
 
 import {
   disposeAllTunnels,
@@ -144,6 +145,30 @@ afterEach(async () => {
 });
 
 describe('agent-proxy tunnel keeper', () => {
+  it('stops retrying and rejects waiters after interactive authentication is cancelled', async () => {
+    vi.useFakeTimers();
+    const h = makeHarness();
+    const connect = vi.fn(async () => { throw new InteractiveAuthenticationError('cancelled'); });
+    h.setupConn = conn => { conn.connect = connect; };
+    const result = ensureTunnelUp(h.mainHost as any);
+    await expect(result).rejects.toThrow('SSH interactive authentication was cancelled.');
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(getTunnelKeeperState('test-host')).toMatchObject({ phase: 'error' });
+  });
+
+  it('allows an interactive connection to wait beyond twenty seconds before arming', async () => {
+    vi.useFakeTimers();
+    const h = makeHarness();
+    let complete!: () => void;
+    h.setupConn = conn => { conn.connect = async () => {
+      await new Promise<void>(resolve => { complete = resolve; }); conn.status = 'ready';
+    }; };
+    const result = ensureTunnelUp(h.mainHost as any);
+    await vi.advanceTimersByTimeAsync(30_000);
+    complete();
+    await expect(result).resolves.toEqual({ remotePort: 45000 });
+  });
   it('connects the dedicated conn, arms the fixed port and reports active', async () => {
     const h = makeHarness();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

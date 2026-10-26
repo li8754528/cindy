@@ -245,11 +245,17 @@ export async function getRemoteAgentProxyEnvUppercase(
 /* ============================== codex daemon env marker ============================== */
 
 async function readRemoteMarker(host: RemoteHost): Promise<string | null> {
+  const prefix = '__CINDY_AGENT_PROXY_MARKER_V1__\n';
   const result = await host.exec(
-    `bash -c 'cat "${REMOTE_AGENT_PROXY_ENV_PATH}" 2>/dev/null || true'`,
-    { timeoutMs: 10_000, label: 'read-agent-proxy-marker' },
+    `bash -c 'printf "__CINDY_AGENT_PROXY_MARKER_V1__\\n"; cat "${REMOTE_AGENT_PROXY_ENV_PATH}" 2>/dev/null || true'`,
+    { timeoutMs: 10_000, maxOutputBytes: 64 * 1024, label: 'read-agent-proxy-marker' },
   );
-  const content = result.stdout.trim();
+  // A bastion can return diagnostics with exit=0 without executing the command.
+  // Require our read frame before treating any bytes as a marker to reconcile.
+  if (result.exitCode !== 0 || result.truncated || !result.stdout.startsWith(prefix)) {
+    throw new Error('Cannot read remote proxy configuration.');
+  }
+  const content = result.stdout.slice(prefix.length).trim();
   return content ? content : null;
 }
 

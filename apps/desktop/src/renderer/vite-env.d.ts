@@ -4232,6 +4232,10 @@ interface ElectronAPI {
   // ── Remote SSH (Phase A) ───────────────────────────────────────────────
   // 连接管理 + OpenSSH config 发现. host.config.id == ssh alias.
   remoteSsh: {
+    getPendingAuthentication: () => Promise<import('../shared/sshAuthentication').SshAuthenticationRequest[]>;
+    answerAuthentication: (requestId: string, answers: string[] | null) => Promise<{ accepted: boolean }>;
+    onAuthenticationRequest: (callback: (request: import('../shared/sshAuthentication').SshAuthenticationRequest) => void) => () => void;
+    onAuthenticationDismissed: (callback: (requestId: string) => void) => () => void;
     list: () => Promise<{
       hosts: RemoteHostSnapshot[];
       warningCount?: number;
@@ -4287,6 +4291,7 @@ interface ElectronAPI {
     statRemotePath: (
       id: string,
       path: string,
+      transport?: 'exec' | 'pty',
     ) => Promise<{ kind: 'dir' | 'file' | 'missing'; resolvedPath: string }>;
     mkdirPRemote: (id: string, path: string) => Promise<{ resolvedPath: string }>;
     setAutoConnect: (
@@ -4297,6 +4302,7 @@ interface ElectronAPI {
     listRemoteDir: (
       id: string,
       path: string,
+      transport?: 'exec' | 'pty',
     ) => Promise<{
       resolvedPath: string;
       entries: Array<{ name: string; kind: 'dir' | 'symlink' }>;

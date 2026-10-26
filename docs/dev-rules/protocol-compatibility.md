@@ -1,5 +1,21 @@
 # 跨端协议兼容
 
+## SSH 堡垒机一次性命令
+
+cindy_ssh 的 ssh_exec 增加可选 transport: exec / pty, 省略仍走既有 exec。
+pty 使用已认证连接的交互 Shell, 先验证随机握手与结果边界再返回一次性命令结果。
+命令以可读的 Bash 参数发送, 远端需已有 Bash 和 base64。保留终端回显, 等待输入回显后
+单独发送回车, 让堡垒机照常解析输入并检查策略; 不自动重放命令、不安装远端组件。
+PTY 的 stderr 合并到 stdout, 结果追加可选 stderrMerged: true 和 transport: pty;
+命令与 stdin 分别上限 64 KiB, 既有输出上限仍生效。此能力不承诺远程 AI 项目或二进制流。
+
+注入的主机接口可选提供 execPty; 旧宿主未提供时明确失败, 不回落 exec。
+既有 stat-remote-path / list-remote-dir 请求同样支持可选 transport, 用于只读路径访问;
+新增 PTY 分支要求 Main 登记的 Cindy 顶层 Renderer, 校验枚举与路径长度。
+省略参数的设备互联调用不变, 不新增 invoke channel 或远程权限。
+旧客户端忽略可选结果字段; 新客户端调用旧实现时不会获得 PTY 能力。
+OTP 仍只交给对应认证尝试, 不经过命令、模型或普通设备互联通道。
+
 ## Device Link 局域网优先直连
 
 可靠链路的 `link-open/link-accept` 增加可选能力 `direct-link-v1`。双方均支持且已完成
