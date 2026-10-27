@@ -960,6 +960,8 @@ export interface LiziMcpSessionContext {
   mcpCallerKind?: LiziMcpCallerKind;
   /** True only when the harness bridge has installed provenance enforcement. */
   mcpCallerAttested?: boolean;
+  /** In-process host callback; only the attested Codex root route may use it. */
+  nativeHarnessHook?: (input: unknown, metadata: unknown) => Promise<Record<string, unknown>>;
 }
 
 export interface CodexHttpMcpConfig {

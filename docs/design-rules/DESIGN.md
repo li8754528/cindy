@@ -622,6 +622,8 @@ Icon refinement reference (2026-10-18, macOS AppKit rendering; enlarged and actu
 - Size and density (owner request, 2026-10-12: lighter on small laptops, verified in every language): every page is 320–368pt wide by tube count, with a 20pt panel radius and 14pt tile radius. The panel never takes more than 86% of the screen's visible height; longer content scrolls between the fixed header and footer. When the visible height is under 1000pt (13–14" laptops at default scaling), the panel opens in a short layout: 82pt tubes instead of 104pt, 160pt rings instead of 188pt, and two task rows instead of three.
 - The usage page (owner-approved redesign, 2026-10-12) shares the panel width and slides in like a detail page instead of widening into a dashboard. Top to bottom it shows: back, title and a 7/30/90-day switch; one total with two caption lines (period, scope and value basis; daily average, paid and tokens); a 100pt stacked chart labeled only with its first day and Today, where hovering a day swaps the total for that day's amount and harness split; a thin harness bar with share and amount per harness; the top five models or today's tasks; and the value note. There is no amount/tokens switch and no scope switch: the scope follows Settings, and the caption names it.
 - Every row must fit in the longest supported language. A segmented control is used only where all its labels fit on one row in every language. The four menu bar text options are a two-column chip grid. Other controls fall back instead of overflowing: the usage-scope picker moves under its title. Screenshots for review cover English, Simplified and Traditional Chinese, Japanese and Korean, in Light and Dark.
+- Keep the main panel's original order: model quota first, tasks second, then the usage chart (owner correction, 2026-10-26). The task section uses three quiet text tabs: Unread, In progress and Today's usage. These are deliberately frameless, with no filled segment track; ink emphasis and a short underline identify selection. Each keeps a 28pt hit height and native keyboard/selected accessibility. Opening with attention selects Unread; otherwise it restores the last manually selected non-unread tab for this helper lifetime. Before any manual choice, prefer In progress when work exists, otherwise Today's usage. Updates never switch an already-open panel, including when the last unread item clears. Opening or switching tabs never acknowledges messages.
+- Unread and In progress reuse the island's full candidate projection before current-card clipping, including remote tasks and restored companion chats. Unread counts the exact attention candidates; In progress includes running and waiting-for-input tasks. Waiting items come first, then newest activity. Rows show identity, message/status preview and time; privacy mode masks both identity and preview. Clicking uses the island's existing device-aware navigation and read acknowledgement. Two rows on short screens, otherwise three, with an in-place All tasks / Collapse action; usage keeps its existing money ranking and usage-page link.
 
 ### Desktop chat and operation authorization (DS-9, 2026-09-11)
 
@@ -632,6 +634,10 @@ Chat prose and compact code use the existing `chatChrome.ts` presentation entry;
 **Android in-app update card (owner-approved HTML direction, registered 2026-10-16, #6199):** `AndroidUpdateSheet` is one content-height Material bottom sheet for discovery, install permission, download and install. Its paired actions are pills (secondary `surfaceChip` left, primary `cta` right). The only bare-text control is the centered browser-download fallback ("改用浏览器下载" / "Download in Browser Instead") shown under the pills while a decision is pending: frameless, `footnote` 13/18 medium in `textSecondary`, full-width 44pt hit height, pressed opacity 0.72. It is a secondary escape route rather than a commit action, so it stays out of the pill pair; this is not a general exemption for other sheet actions. In short windows the details region scrolls while the actions stay pinned. Floating compatibility presentations round all four container corners. The Light/Dark HTML previews are not Android device screenshots.
 
 **Desktop Permission decisions, user-approved 2026-09-11 after actual-component comparison:** Allow once remains the visual main action using `perm-allow-*`; deny and session-scoped allow remain secondary. Retain neutral operation information: Desktop has no trusted risk-level field, and `autoReviewUnavailable` is not a risk conclusion. No invented danger variant or command-based risk inference. Keep the request in the composer area with title → description → scrollable operation → right-aligned wrapping actions, at the existing density. Use Button with a narrow local-alias adaptation; apply §5's existing pill-button and keycap treatments. Keep long scoped rules bounded by the column and available in the Tip. Labels, order, shortcuts, IME/editable-focus guards, submitting and failure recovery remain owned by the existing permission flow. This decision does not cover permission mode selectors, account/plugin authorization lifecycles or Mobile layout; Mobile is deferred to its own phase.
+
+### Desktop chat threads
+
+Group and private threads share the same panel chrome, root message row and reply divider. The complete root message belongs to the replies’ scroll container; it has no independent height limit or scrollbar. Keep the header and reply composer visible outside that scrolling content. Private threads retain the ordinary task runtime for progress, approvals and stopping.
 
 ### Desktop group progress strip
 
@@ -1181,7 +1187,8 @@ Known but deliberately-deferred cleanups are tracked in the decision log's backl
 
 Applies to submit-on-Enter fields: the chat composer, goal input, ask input, etc. **Not** ordinary single-line editors in Settings — there Enter must not submit.
 
-- **Enter = submit**, **Shift+Enter = newline**.
+- By default, **Enter = submit**, **Shift+Enter = newline**. The desktop chat composer also supports the existing **Cmd/Ctrl+Enter = submit** preference; when enabled, **Enter = newline**.
+- Composer list continuation follows newline intent: Enter in that preference, as well as Shift/Alt+Enter, continues a list or exits an empty item. Send shortcuts and IME confirmation must not edit lists; fenced code keeps native newline behavior. The shared key handler is `handleComposerListEnter` in `apps/desktop/src/renderer/components/new-chat/ComposerListNodes.ts`, covered by `apps/desktop/src/renderer/lib/__tests__/composerListContinuationEditor.test.ts`.
 - **Enter during IME composition must not submit** — check `event.nativeEvent.isComposing` (a CJK user confirming a candidate must not accidentally send).
 - Centralize this logic in code; do not re-implement it per field and let behavior drift (per "code-first determinism" in `docs/dev-rules/maker-core-and-agent-behavior.md`).
 
@@ -1200,24 +1207,6 @@ before activation. Recording/refinement, Stop, Queue and queue editing retain th
 existing actions. Other composers keep their existing behavior.
 
 #### Motion tokens (the only tier source)
-
-**Message arrival and delivery continuity (2026-10-25).** Keep the existing bubble
-colors, shape and typography. New timeline rows enter once with a subtle opacity /
-6px/pt translation while their occupied space grows continuously on mobile. Arrival
-comes from visible message identities, not the age of the first token. Initial
-history, older pages, replacement windows and recycled cells do not replay; streaming
-updates and delivery acknowledgement retain their row identity. Reduced motion shows
-the final state immediately, including when enabled during an entrance.
-
-Animate occupied space through streamed wrapping, thinking/work previews, action-row
-changes, recommendations and status removal. Retain exiting content until its space
-closes. Only one scroll owner follows the tail; keyboard and composer reservation must
-use the same evolving geometry as scroll compensation. A reader's drag/history position
-takes precedence. Keep native text selection and the existing message actions; pending
-sends retain the settled action-row space. Reserve streaming action space without
-exposing unfinished-message actions, and collapse intermediate replies' unused space
-continuously. Frame-rate claims require actual display/frame evidence, not interpolated
-recordings or an animation-duration setting.
 
 Global tokens live in `:root` of `apps/desktop/src/renderer/styles/globals.css`; mobile (`apps/mobile`) mirrors same-name same-value constants in `src/theme/tokens.ts` (dual-platform isomorphism, same policy as color tokens, landing with the mobile motion overhaul). **New transitions/animations must reference tokens — no hardcoded durations or cubic-beziers**; 5 interaction-duration tiers + 3 curves, the same philosophy as the §5 radius scale. Values outside the tiers require design review first. Narrow semantic exceptions are recorded directly below.
 

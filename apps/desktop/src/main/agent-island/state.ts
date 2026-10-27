@@ -1136,6 +1136,7 @@ export type AgentIslandDeviceSessionEventKind = 'done' | 'error' | 'needs-reply'
 
 export interface AgentIslandDeviceSessionEvent {
   sessionId: string;
+  deviceId: string;
   title: string | null;
   deviceName: string | null;
   kind: AgentIslandDeviceSessionEventKind;
@@ -1203,6 +1204,7 @@ export function syncAgentIslandDeviceSessions(
     if (transition.event) {
       result.events.push({
         sessionId: input.sessionId,
+        deviceId: input.deviceId,
         title: input.title,
         deviceName: input.deviceName,
         kind: transition.event,
@@ -1534,14 +1536,7 @@ export function buildAgentIslandDisplayState(
       && (state.isMouseInExpandedPanel || isCollapsePending(state, now))
     );
   promoteNextTransientReveal(state, now, manualExpanded);
-  const sortedSessions = projectCompanionChats(state, companionChats)
-    .filter((session) => shouldDisplaySession(
-      state,
-      session,
-      now,
-      isPointerInsideIsland(state) || state.hoverExpanded || isCollapsePending(state, now),
-    ))
-    .sort((a, b) => compareSessionsForDisplay(state, a, b, now));
+  const sortedSessions = visibleOverviewSessions(state, now, companionChats);
   const activeTransient = getActiveTransientSession(state, now);
   const orderedSessions = orderSessionsForCurrentSurface(
     state,
@@ -1593,6 +1588,28 @@ export interface AgentIslandCompanionChatProjection {
   lastMessageAt: number;
   preview: string;
   token: string;
+}
+
+/** The same candidates counted by the pill, before its current-card/list clipping. */
+export function buildAgentIslandTaskOverview(
+  state: AgentIslandState,
+  now: number,
+  companionChats: readonly AgentIslandCompanionChatProjection[] = [],
+): AgentIslandSessionSnapshot[] {
+  return visibleOverviewSessions(state, now, companionChats).map(toSnapshot);
+}
+
+function visibleOverviewSessions(
+  state: AgentIslandState,
+  now: number,
+  companionChats: readonly AgentIslandCompanionChatProjection[],
+): AgentIslandSessionState[] {
+  return projectCompanionChats(state, companionChats)
+    .filter((session) => shouldDisplaySession(
+      state, session, now,
+      isPointerInsideIsland(state) || state.hoverExpanded || isCollapsePending(state, now),
+    ))
+    .sort((a, b) => compareSessionsForDisplay(state, a, b, now));
 }
 
 /** Chat read positions own reply attention; the runtime still owns errors and interactions.

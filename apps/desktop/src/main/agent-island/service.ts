@@ -105,6 +105,7 @@ import {
   applyAgentIslandInteractionRequest,
   applyAgentIslandUserPrompt,
   buildAgentIslandDisplayState,
+  buildAgentIslandTaskOverview,
   buildAllSessionActivitySnapshots,
   closeAgentIslandSessionPreservingUnread,
   completeAgentIslandSessionWithoutAttention,
@@ -343,6 +344,7 @@ function canonicalSessionActivity(
 export class AgentIslandService {
   private attentionCount = 0;
   private readonly attentionCountListeners = new Set<(count: number) => void>();
+  private readonly taskOverviewListeners = new Set<() => void>();
   private readonly sessionActivityListeners = new Set<
     (transition: SessionActivityTransition) => void
   >();
@@ -1897,12 +1899,32 @@ export class AgentIslandService {
     return this.attentionCount;
   }
 
+  getTaskOverview(): AgentIslandSessionSnapshot[] {
+    return buildAgentIslandTaskOverview(this.state, Date.now(), this.companionChatProjections());
+  }
+
+  subscribeTaskOverview(listener: () => void): () => void {
+    this.taskOverviewListeners.add(listener);
+    return () => this.taskOverviewListeners.delete(listener);
+  }
+
+  /** Menu-bar entry uses the same device/companion navigation and read acknowledgement. */
+  openTaskOverviewSession(sessionId: string): void {
+    this.focusSession(sessionId);
+  }
+
   subscribeAttentionCount(listener: (count: number) => void): () => void {
     this.attentionCountListeners.add(listener);
     return () => this.attentionCountListeners.delete(listener);
   }
 
   private publishAttentionCount(count: number): void {
+    // Content can change without changing the count (including restored companion chats).
+    for (const listener of this.taskOverviewListeners) {
+      try { listener(); } catch (error) {
+        log.warn('task overview listener failed', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     if (count === this.attentionCount) return;
     this.attentionCount = count;
     for (const listener of this.attentionCountListeners) {
@@ -2741,13 +2763,16 @@ export class AgentIslandService {
     if (!nextSessionId) return;
     const now = Date.now();
     const islandEntryId = this.recordIslandEntryAlert(nextSessionId, now);
+    const deviceId = this.state.sessions.get(nextSessionId)?.sourceDeviceId
+      ?? this.companionChats.get(nextSessionId)?.input.deviceId;
+    const target = { ...(islandEntryId ? { islandEntryId } : {}), ...(deviceId ? { deviceId } : {}) };
     this.playConfiguredSound('select', now);
     if (this.state.appFocused && this.state.visibleSessionIds.has(nextSessionId)) {
       const focusChanged = requestAgentIslandSessionFocus(this.state, nextSessionId, now);
       if (focusChanged) this.publish();
       // 已在看的目标未必能处置这张卡(如只读历史):这次点击仍要交给 renderer,
       // 入口导航器发现目标地址已提交时直接按点击编号申请处置,不会再导航一次。
-      if (islandEntryId) openMainWindowSession(nextSessionId, { islandEntryId });
+      if (islandEntryId) openMainWindowSession(nextSessionId, target);
       return;
     }
 
@@ -2756,7 +2781,7 @@ export class AgentIslandService {
     // Reuse the primary-window handoff: it retains navigation while the
     // renderer reloads and restores macOS app focus. A one-shot notification
     // sent during loading is lost before MainLayout can acknowledge the task.
-    openMainWindowSession(nextSessionId, islandEntryId ? { islandEntryId } : undefined);
+    openMainWindowSession(nextSessionId, Object.keys(target).length ? target : undefined);
   }
 
   private readonly completionActionsPending = new Set<string>();
